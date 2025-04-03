@@ -8,11 +8,11 @@
   cognee - memory layer for AI apps and Agents
 
   <p align="center">
+  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  .
   <a href="https://cognee.ai">Learn more</a>
   ·
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
-  ·
-  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
   </p>
 
 
@@ -85,64 +85,41 @@ To use different LLM providers, for more info check out our <a href="https://doc
 
 ### Simple example
 
-Add LLM_API_KEY to .env using the command bellow.
-```
-echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
-```
-You can see available env variables in the repository `.env.template` file.
-
 This script will run the default pipeline:
 
 ```python
 import cognee
 import asyncio
-from cognee.modules.search.types import SearchType
+
 
 async def main():
-    # Create a clean slate for cognee -- reset data and system state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    # cognee knowledge graph will be created based on this text
-    text = """
-    Natural language processing (NLP) is an interdisciplinary
-    subfield of computer science and information retrieval.
-    """
+    # Add text to cognee
+    await cognee.add("Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.")
 
-    print("Adding text to cognee:")
-    print(text.strip())
-    # Add the text, and make it available for cognify
-    await cognee.add(text)
-
-    # Use LLMs and cognee to create knowledge graph
+    # Generate the knowledge graph
     await cognee.cognify()
-    print("Cognify process complete.\n")
 
+    # Query the knowledge graph
+    results = await cognee.search("Tell me about NLP")
 
-    query_text = "Tell me about NLP"
-    print(f"Searching cognee for insights with query: '{query_text}'")
-    # Query cognee for insights on the added text
-    search_results = await cognee.search(
-        query_text=query_text, query_type=SearchType.INSIGHTS
-    )
+    # Display the results
+    for result in results:
+        print(result)
 
-    print("Search results:")
-    # Display results
-    for result_text in search_results:
-        print(result_text)
-
-    # Example output:
-       # ({'id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'natural language processing', 'description': 'An interdisciplinary subfield of computer science and information retrieval.'}, {'relationship_name': 'is_a_subfield_of', 'source_node_id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'target_node_id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 15, 473137, tzinfo=datetime.timezone.utc)}, {'id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'computer science', 'description': 'The study of computation and information processing.'})
-       # (...)
-        #
-        # It represents nodes and relationships in the knowledge graph:
-        # - The first element is the source node (e.g., 'natural language processing').
-        # - The second element is the relationship between nodes (e.g., 'is_a_subfield_of').
-        # - The third element is the target node (e.g., 'computer science').
 
 if __name__ == '__main__':
     asyncio.run(main())
 
 ```
+Example output:
+```
+  Natural Language Processing (NLP) is a cross-disciplinary and interdisciplinary field that involves computer science and information retrieval. It focuses on the interaction between computers and human language, enabling machines to understand and process natural language.
+  
+```
+Graph visualization:
+<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/add-visualization-readme/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="Graph Visualization"></a>
+Open in [browser](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/add-visualization-readme/assets/graph_visualization.html).
+
 For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
 
 
@@ -156,9 +133,17 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 ## Demos
 
-What is AI memory:
+1. What is AI memory:
 
 [Learn about cognee](https://github.com/user-attachments/assets/8b2a0050-5ec4-424c-b417-8269971503f0)
+
+2. Simple GraphRAG demo
+
+[Simple GraphRAG demo](https://github.com/user-attachments/assets/d80b0776-4eb9-4b8e-aa22-3691e2d44b8f)
+
+3. cognee with Ollama
+
+[cognee with local models](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
 
 
 ## Code of Conduct
