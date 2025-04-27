@@ -1,63 +1,72 @@
-from collections import deque
-
+import inspect
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.users.models import User
+from cognee.shared.utils import send_telemetry
 
-from .needs import get_need_task_results, get_task_needs
-from ..tasks.Task import Task, TaskExecutionCompleted, TaskExecutionInfo
-from ..exceptions import WrongTaskOrderException
+from ..tasks.task import Task
 
-logger = get_logger("run_tasks_base(tasks: list[Task], data)")
+logger = get_logger("run_tasks_base")
 
 
-async def run_tasks_base(tasks: list[Task], data=None, context=None):
+async def handle_task(
+    running_task: Task,
+    args: list,
+    leftover_tasks: list[Task],
+    next_task_batch_size: int,
+    user: User,
+):
+    """Handle common task workflow with logging, telemetry, and error handling around the core execution logic."""
+    task_type = running_task.task_type
+
+    logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
+    send_telemetry(
+        f"{task_type} Task Started",
+        user_id=user.id,
+        additional_properties={
+            "task_name": running_task.executable.__name__,
+        },
+    )
+
+    try:
+        async for result_data in running_task.execute(args, next_task_batch_size):
+            async for result in run_tasks_base(leftover_tasks, result_data, user):
+                yield result
+
+        logger.info(f"{task_type} task completed: `{running_task.executable.__name__}`")
+        send_telemetry(
+            f"{task_type} Task Completed",
+            user_id=user.id,
+            additional_properties={
+                "task_name": running_task.executable.__name__,
+            },
+        )
+    except Exception as error:
+        logger.error(
+            f"{task_type} task errored: `{running_task.executable.__name__}`\n{str(error)}\n",
+            exc_info=True,
+        )
+        send_telemetry(
+            f"{task_type} Task Errored",
+            user_id=user.id,
+            additional_properties={
+                "task_name": running_task.executable.__name__,
+            },
+        )
+        raise error
+
+
+async def run_tasks_base(tasks: list[Task], data=None, user: User = None):
+    """Base function to execute tasks in a pipeline, handling task type detection and execution."""
     if len(tasks) == 0:
+        yield data
         return
 
-    pipeline_input = [data] if data is not None else []
+    args = [data] if data is not None else []
 
-    """Run tasks in dependency order and return results."""
-    task_graph = {}  # Map task to its dependencies
-    dependents = {}  # Reverse dependencies (who depends on whom)
-    results = {}
-    number_of_executed_tasks = 0
+    running_task = tasks[0]
+    leftover_tasks = tasks[1:]
+    next_task = leftover_tasks[0] if len(leftover_tasks) > 0 else None
+    next_task_batch_size = next_task.task_config["batch_size"] if next_task else 1
 
-    tasks_map = {task.executable: task for task in tasks}  # Map task executable to task object
-
-    # Build task dependency graph
-    for task in tasks:
-        task_graph[task.executable] = get_task_needs(task.task_config.needs)
-        for dependent_task in task_graph[task.executable]:
-            dependents.setdefault(dependent_task, []).append(task.executable)
-
-    # Find tasks without dependencies
-    ready_queue = deque([task for task in tasks if not task_graph[task.executable]])
-
-    # Execute tasks in order
-    while ready_queue:
-        task = ready_queue.popleft()
-        task_inputs = (
-            get_need_task_results(results, task) if task.task_config.needs else pipeline_input
-        )
-
-        async for task_execution_info in task.run(*task_inputs):  # Run task and store result
-            if isinstance(task_execution_info, TaskExecutionInfo):  # Update result as it comes
-                results[task.executable] = task_execution_info.result
-
-            if isinstance(task_execution_info, TaskExecutionCompleted):
-                if task.executable not in results:  # If result not already set, set it
-                    results[task.executable] = task_execution_info.result
-
-                number_of_executed_tasks += 1
-
-            yield task_execution_info
-
-        # Process tasks depending on this task
-        for dependent_task in dependents.get(task.executable, []):
-            task_graph[dependent_task].remove(task.executable)  # Mark dependency as resolved
-            if not task_graph[dependent_task]:  # If all dependencies resolved, add to queue
-                ready_queue.append(tasks_map[dependent_task])
-
-    if number_of_executed_tasks != len(tasks):
-        raise WrongTaskOrderException(
-            f"{number_of_executed_tasks}/{len(tasks)} tasks executed. You likely have some disconnected tasks or circular dependency."
-        )
+    async for result in handle_task(running_task, args, leftover_tasks, next_task_batch_size, user):
+        yield result

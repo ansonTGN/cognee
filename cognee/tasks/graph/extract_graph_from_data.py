@@ -12,6 +12,7 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.tasks.storage import add_data_points
 
 
 async def integrate_chunk_graphs(
@@ -27,6 +28,7 @@ async def integrate_chunk_graphs(
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
 
+        await add_data_points(chunk_graphs)
         return data_chunks
 
     existing_edges_map = await retrieve_existing_edges(
@@ -39,16 +41,37 @@ async def integrate_chunk_graphs(
         data_chunks, chunk_graphs, ontology_adapter, existing_edges_map
     )
 
-    return graph_nodes, graph_edges
+    if len(graph_nodes) > 0:
+        await add_data_points(graph_nodes)
+
+    if len(graph_edges) > 0:
+        await graph_engine.add_edges(graph_edges)
+
+    return data_chunks
 
 
 async def extract_graph_from_data(
-    data_chunks: list[DocumentChunk],
+    data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_adapter: OntologyResolver = OntologyResolver(),
+    ontology_adapter: OntologyResolver = None,
 ) -> List[DocumentChunk]:
-    """Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model."""
+    """
+    Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
+    """
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
+
+    # Note: Filter edges with missing source or target nodes
+    if graph_model == KnowledgeGraph:
+        for graph in chunk_graphs:
+            valid_node_ids = {node.id for node in graph.nodes}
+            graph.edges = [
+                edge
+                for edge in graph.edges
+                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
+            ]
+
+    return await integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_adapter or OntologyResolver()
+    )

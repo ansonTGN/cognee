@@ -1,31 +1,29 @@
 import json
-from typing import Any
-from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
+from cognee.shared.logging_utils import get_logger
+from uuid import UUID, uuid4
 
+from typing import Any
 from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
-from cognee.modules.users.methods import get_default_user
 from cognee.modules.settings import get_current_settings
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
-from cognee.shared.logging_utils import get_logger
+from uuid import uuid5, NAMESPACE_OID
 
-from ..tasks.Task import Task, TaskExecutionCompleted, TaskExecutionErrored, TaskExecutionStarted
 from .run_tasks_base import run_tasks_base
+from ..tasks.task import Task
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
-async def run_tasks_with_telemetry(
-    tasks: list[Task], data, pipeline_name: str, context: dict = None
-):
+async def run_tasks_with_telemetry(tasks: list[Task], data, user: User, pipeline_name: str):
     config = get_current_settings()
 
     logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
-
-    user = await get_default_user()
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)
@@ -38,45 +36,8 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        async for run_task_info in run_tasks_base(tasks, data, context):
-            if isinstance(run_task_info, TaskExecutionStarted):
-                send_telemetry(
-                    "Task Run Started",
-                    user.id,
-                    additional_properties={
-                        "task_name": run_task_info.task.__name__,
-                    }
-                    | config,
-                )
-
-            if isinstance(run_task_info, TaskExecutionCompleted):
-                send_telemetry(
-                    "Task Run Completed",
-                    user.id,
-                    additional_properties={
-                        "task_name": run_task_info.task.__name__,
-                    }
-                    | config,
-                )
-
-            if isinstance(run_task_info, TaskExecutionErrored):
-                send_telemetry(
-                    "Task Run Errored",
-                    user.id,
-                    additional_properties={
-                        "task_name": run_task_info.task.__name__,
-                        "error": str(run_task_info.error),
-                    }
-                    | config,
-                )
-                logger.error(
-                    "Task run errored: `%s`\n%s\n",
-                    run_task_info.task.__name__,
-                    str(run_task_info.error),
-                    exc_info=True,
-                )
-
-            yield run_task_info
+        async for result in run_tasks_base(tasks, data, user):
+            yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
         send_telemetry(
@@ -107,22 +68,22 @@ async def run_tasks_with_telemetry(
 
 async def run_tasks(
     tasks: list[Task],
-    dataset_id: UUID = None,
+    dataset_id: UUID = uuid4(),
     data: Any = None,
+    user: User = None,
     pipeline_name: str = "unknown_pipeline",
-    context: dict = None,
 ):
-    dataset_id = dataset_id or uuid4()
     pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
 
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
 
     yield pipeline_run
-
     pipeline_run_id = pipeline_run.pipeline_run_id
 
     try:
-        async for _ in run_tasks_with_telemetry(tasks, data, pipeline_id, context):
+        async for _ in run_tasks_with_telemetry(
+            tasks=tasks, data=data, user=user, pipeline_name=pipeline_id
+        ):
             pass
 
         yield await log_pipeline_run_complete(
